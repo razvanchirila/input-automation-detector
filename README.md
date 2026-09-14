@@ -1,0 +1,185 @@
+# Input Automation Detector
+
+A service that scores a burst of input telemetry — mouse moves, clicks, keystrokes — for
+how likely it is to have been produced by automation rather than a person. It runs three
+independent statistical detectors over the event stream (timing regularity, cursor path
+geometry, key-press duration shape), folds them into one explainable score, and exposes
+the whole thing over HTTP. The interesting part is not that it catches obvious bots; a
+constant-delay, straight-line script is trivial. It is that the evaluation corpus includes
+a deliberately humanized *evasive* population — jittered lognormal timing, Bezier cursor
+paths, overshoot, human-shaped dwell distributions — and the reported metrics are measured
+against that, so the numbers below are the honest hard case rather than a flattering one.
+
+## Quick start
+
+```bash
+python -m venv .venv
+.venv\Scripts\activate          # Windows
+# source .venv/bin/activate     # Linux / macOS
+pip install -r requirements.txt
+
+pytest                          # 66 tests
+python eval/evaluate.py         # regenerates eval/results.md
+uvicorn iad.api:app --reload --app-dir src
+```
+
+Then open http://127.0.0.1:8000/docs, or try it without any data of your own:
+
+```bash
+curl -X POST "http://127.0.0.1:8000/synth?kind=bot_evasive&seed=1" > s.json
+curl -X POST http://127.0.0.1:8000/score -H "content-type: application/json" -d @s.json
+```
+
+With Docker:
+
+```bash
+docker compose up --build         # http://127.0.0.1:8000
+```
+
+## API
+
+| Method | Path | Purpose |
+|---|---|---|
+| `POST` | `/score` | Score a session. Returns the combined score, every detector's score, and a boolean verdict at the configured threshold. |
+| `GET` | `/health` | Liveness plus the active detectors, weights and threshold. |
+| `POST` | `/synth` | Generate an example session (`kind` = `human` / `bot_naive` / `bot_evasive`, optional `seed`) so the API can be exercised without real capture. |
+| `POST` | `/demo` | Generate and immediately score one session. Convenience wrapper. |
+
+A detector with too little data to decide returns `0.5` rather than guessing, so a
+two-event session scores exactly `0.5` and is not flagged.
+
+## The three detectors
+
+Each returns a float in `[0,1]`, higher meaning more bot-like. They are built to fail
+independently, so that defeating one does not defeat the others.
+
+**Interval regularity** (`src/iad/detectors/interval_regularity.py`) — Human inter-action
+delays are heavy-tailed: a broad lognormal body plus real multi-second pauses. Three
+sub-signals: the coefficient of variation of the intervals; the normalized Shannon entropy
+of the scale-free log-interval histogram, which measures distribution *shape* so that
+injecting two fake pauses into an otherwise metronomic stream does not rescue it; and the
+share of intervals that have a near-duplicate partner within 3% relative distance, which
+catches quantized or replayed schedules. Only press events feed this detector — cursor
+sampling rate is a property of the capture layer, not the actor.
+
+**Cursor path curvature** (`src/iad/detectors/cursor_curvature.py`) — A human reach is
+ballistic, overshoots, then corrects, with tremor throughout. Strokes are re-derived from
+resting gaps in the timestamps rather than trusted from the producer. Per stroke it
+computes path efficiency (end-to-end distance over travelled length), the rate at which the
+signed turn angle reverses, and whether the path travels past the endpoint on the
+start→end axis. The reversal rate is scored as a two-sided band, not a threshold: a
+spline-smoothed bot sits below the human band and a bot faking tremor with white noise sits
+above it, and both are non-human.
+
+**Dwell time distribution** (`src/iad/detectors/dwell_distribution.py`) — Press durations in
+humans are broad and right-skewed. Because mean dwell varies hugely between people and
+keyboards, every sub-signal is scale-free: dwells are normalized by their own median first.
+It compares the distribution *shape* via a Kolmogorov-Smirnov distance between
+`log(dwell / median)` and a reference `N(0, 0.42)` fitted from the human population, plus
+the coefficient of variation, the sample skewness against a human band, and the share of
+values that collide at 1 ms resolution. The KS distance is used as a shape metric only; no
+p-value is derived from it, since the location is estimated from the sample itself.
+
+The combiner (`src/iad/scoring.py`) is a fixed-weight arithmetic mean. That is deliberate:
+it is monotonic, so raising any one detector can never lower the verdict, which is what
+makes a flag explainable to whoever has to action it; it is bounded in `[0,1]` by
+construction; and nothing is fitted to the corpus except the single decision threshold, so
+the metrics below are not a model grading its own homework.
+
+## Results
+
+Measured on a held-out half of a 12,000-session synthetic corpus, seed `20260915`.
+Full report, regenerated by `python eval/evaluate.py`: [`eval/results.md`](eval/results.md).
+
+Corpus: 6,000 human, 3,303 naive bot, 2,697 evasive bot — 45% of all bots are evasive.
+Split 6,000 train / 6,000 test; the training half is used only to pick the threshold.
+
+**Ranking quality** (threshold-free):
+
+| Contrast | ROC AUC |
+|---|---|
+| All bots vs human | 0.9660 |
+| Evasive bots vs human | 0.9226 |
+
+**Operating point A — max-F1** (threshold 0.1923, chosen on the training half):
+
+| Precision | Recall | F1 | Accuracy | FPR |
+|---|---|---|---|---|
+| 0.8954 | 0.8942 | 0.8948 | 0.8947 | 0.1049 |
+
+**Operating point B — conservative**, sub-1% false positives (threshold 0.2907). This is
+the point that matters if the downstream action is a ban rather than a review queue:
+
+| Precision | Recall | F1 | Accuracy | FPR |
+|---|---|---|---|---|
+| 0.9886 | 0.7226 | 0.8350 | 0.8568 | 0.0084 |
+
+**Recall split, naive vs evasive** — the most informative number here:
+
+| Population | At max-F1 | At sub-1% FPR |
+|---|---|---|
+| Naive bot | 1.0000 | 1.0000 |
+| Evasive bot | 0.7596 | 0.3696 |
+
+Naive recall is 1.00 because a constant-delay, straight-line, fixed-dwell script is
+trivially separable — that figure says nothing about detector quality. Evasive recall is
+the real result: roughly three quarters of humanized automation is caught when 10% false
+positives are tolerable, and roughly a third when they are not.
+
+**Per-detector contribution** (test half):
+
+| Detector | Weight | AUC, all bots | AUC, evasive only |
+|---|---|---|---|
+| `interval_regularity` | 0.34 | 0.9206 | 0.8196 |
+| `cursor_curvature` | 0.36 | 0.9367 | 0.8561 |
+| `dwell_distribution` | 0.30 | 0.8689 | 0.7019 |
+| **combined** | — | **0.9660** | **0.9226** |
+
+The combined score beats every individual detector on both contrasts, which is the
+justification for carrying three signals instead of the best one.
+
+### Honest caveats
+
+- **The corpus is synthetic.** These numbers measure separation between *this generator's*
+  populations. They are not an estimate of real-world accuracy, which needs labelled
+  capture from production. What the synthetic corpus does buy is a reproducible,
+  adversarially-parameterized test bed where the difficulty is explicit in the code.
+- The evasive population encodes one specific set of humanizer assumptions. An adversary
+  who also models minimum-jerk velocity profiles and overshoot-and-correct reaching would
+  score lower. The dwell-shape sub-signal is already near-blind to it: measured in
+  isolation, the KS statistic separates evasive bots from humans at AUC 0.50.
+- The combined score is a **ranking statistic, not a calibrated probability**. Its absolute
+  value is not meaningful — humans average 0.107 and evasive bots 0.259 — only the ordering
+  and the fitted threshold are. Calibration would need real labelled data.
+- Sessions are short bursts of roughly 15–23 action units. Sub-signals that need sample
+  size, notably dwell skewness, are noisy at this length and carry the smallest weights.
+- `tests/test_synth.py::test_evasive_bot_overlaps_humans_on_raw_statistics` is a tripwire:
+  it fails if a future change to the generator makes any raw statistic separable on its
+  own, which would silently inflate every metric above.
+
+## Layout
+
+```
+src/iad/models.py          pydantic InputEvent / Session / ScoreResult
+src/iad/detectors/         base protocol + numeric view, one module per detector
+src/iad/scoring.py         weighted-mean combiner, thresholds
+src/iad/synth.py           three-population synthetic generator
+src/iad/api.py             FastAPI app
+eval/evaluate.py           builds corpus, scores, writes eval/results.md
+tests/                     66 pytest tests
+```
+
+Detectors never see pydantic models. They read a `SessionArrays`, a flat numpy view
+derived from the raw event stream, which keeps a 12,000-session sweep at ~22 s wall time
+and guarantees that the evaluation path and the API path compute identical features —
+asserted by `test_array_fast_path_matches_pydantic_path`.
+
+## Notes on reproducing
+
+`eval/results.md` is generated from the default full run (12,000 sessions, seed
+`20260915`) and is overwritten by any invocation of `eval/evaluate.py`, including a
+smaller `--sessions` run. Re-run without arguments to restore it.
+
+Detector calibration constants — ramp endpoints and band centres — were set from the
+measured human population and are fixed in the library. They are not re-fitted per run,
+and the test half is never used to choose them.
