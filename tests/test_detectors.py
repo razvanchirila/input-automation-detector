@@ -20,7 +20,7 @@ from iad.detectors import (
     default_detectors,
     from_session,
 )
-from iad.detectors.base import NEUTRAL, SessionArrays
+from iad.detectors.base import SessionArrays
 from iad.synth import generate_arrays, generate_session
 
 N_SAMPLE = 120
@@ -90,7 +90,7 @@ def test_detector_is_deterministic():
         assert d.score(arrays) == d.score(arrays)
 
 
-def test_empty_session_returns_neutral():
+def test_empty_session_abstains():
     """With no data a detector must abstain, not guess."""
     empty = SessionArrays(
         t_move=np.empty(0),
@@ -101,7 +101,7 @@ def test_empty_session_returns_neutral():
         n_events=0,
     )
     for d in ALL_DETECTORS:
-        assert d.score(empty) == NEUTRAL
+        assert d.score(empty) is None
 
 
 def test_default_detectors_have_unique_names():

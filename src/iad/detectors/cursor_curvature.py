@@ -1,4 +1,4 @@
-﻿"""Detector 2: geometry of cursor strokes.
+"""Detector 2: geometry of cursor strokes.
 
 A human reaching for a target produces a ballistic phase that overshoots, then
 one or more corrective sub-movements, with tremor superimposed throughout. The
@@ -25,7 +25,6 @@ from __future__ import annotations
 import numpy as np
 
 from iad.detectors.base import (
-    NEUTRAL,
     SessionArrays,
     band_deviation,
     clamp01,
@@ -82,7 +81,7 @@ def _stroke_stats(px: np.ndarray, py: np.ndarray) -> tuple[float, float, bool] |
 class CursorCurvatureDetector:
     name = "cursor_curvature"
 
-    def score(self, s: SessionArrays) -> float:
+    def score(self, s: SessionArrays) -> float | None:
         effs: list[float] = []
         revs: list[float] = []
         overs: list[bool] = []
@@ -96,7 +95,7 @@ class CursorCurvatureDetector:
             overs.append(st[2])
 
         if len(effs) < MIN_STROKES:
-            return NEUTRAL
+            return None
 
         straightness = ramp(float(np.median(effs)), 0.885, 0.990)
         reversal = band_deviation(

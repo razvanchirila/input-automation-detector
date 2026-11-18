@@ -45,8 +45,11 @@ docker compose up --build         # http://127.0.0.1:8000
 | `POST` | `/synth` | Generate an example session (`kind` = `human` / `bot_naive` / `bot_evasive`, optional `seed`) so the API can be exercised without real capture. |
 | `POST` | `/demo` | Generate and immediately score one session. Convenience wrapper. |
 
-A detector with too little data to decide returns `0.5` rather than guessing, so a
-two-event session scores exactly `0.5` and is not flagged.
+A detector with too little data to decide abstains: its entry in `detector_scores` is
+`null` and it is left out of the weighted mean, whose remaining weights are renormalized.
+If every detector abstains, as for a two-event session, the response carries
+`"insufficient_data": true` with `score` and `verdict` both `null`, so a short session is
+never flagged.
 
 ## The three detectors
 

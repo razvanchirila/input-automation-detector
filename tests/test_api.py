@@ -58,8 +58,10 @@ def test_score_response_shape(client):
         "detector_scores",
         "threshold",
         "verdict",
+        "insufficient_data",
         "n_events",
     }
+    assert body["insufficient_data"] is False
     assert 0.0 <= body["score"] <= 1.0
     assert len(body["detector_scores"]) == 3
     assert all(0.0 <= v <= 1.0 for v in body["detector_scores"].values())
@@ -126,22 +128,44 @@ def test_synth_rejects_unknown_kind(client):
     assert client.post("/synth", params={"kind": "bot_perfect"}).status_code == 422
 
 
+def _keys(n_presses: int) -> list[dict]:
+    events = []
+    for i in range(n_presses):
+        events.append({"t": i * 0.3, "type": "key_down", "code": "a"})
+        events.append({"t": i * 0.3 + 0.1, "type": "key_up", "code": "a"})
+    return events
+
+
 def test_tiny_session_abstains_rather_than_guessing(client):
-    """Too little data must yield the neutral score, not a confident verdict."""
-    r = client.post(
-        "/score",
-        json={
-            "session_id": "tiny",
-            "events": [
-                {"t": 0.0, "type": "key_down", "code": "a"},
-                {"t": 0.1, "type": "key_up", "code": "a"},
-            ],
-        },
-    )
+    """Too little data must yield no verdict, not a confident one."""
+    r = client.post("/score", json={"session_id": "tiny", "events": _keys(1)})
     assert r.status_code == 200
     body = r.json()
-    assert body["score"] == pytest.approx(0.5)
-    assert all(v == pytest.approx(0.5) for v in body["detector_scores"].values())
+    assert body["insufficient_data"] is True
+    assert body["verdict"] is None
+    assert body["score"] is None
+    assert all(v is None for v in body["detector_scores"].values())
+
+
+@pytest.mark.parametrize("n_presses", [1, 2, 4, 7])
+def test_short_sessions_are_never_flagged(client, n_presses):
+    r = client.post("/score", json={"session_id": "short", "events": _keys(n_presses)})
+    assert r.status_code == 200
+    assert r.json()["verdict"] is not True
+
+
+def test_abstaining_detectors_are_excluded_from_the_score(client):
+    """Keys only: cursor_curvature abstains, the other two decide alone."""
+    body = client.post(
+        "/score", json={"session_id": "keys", "events": _keys(12)}
+    ).json()
+    scores = body["detector_scores"]
+    assert scores["cursor_curvature"] is None
+    assert scores["interval_regularity"] is not None
+    assert scores["dwell_distribution"] is not None
+    assert body["insufficient_data"] is False
+    # A metronomic, fixed-dwell key stream is a bot even without cursor data.
+    assert body["verdict"] is True
 
 
 def test_openapi_is_served(client):

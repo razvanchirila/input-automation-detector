@@ -16,7 +16,8 @@ Weights are hand-set from the per-detector discrimination measured in
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from collections.abc import Mapping
+from dataclasses import dataclass, field
 
 from iad.detectors import Detector, SessionArrays, default_detectors, from_session
 from iad.models import ScoreResult, Session
@@ -39,17 +40,18 @@ CONSERVATIVE_THRESHOLD = 0.2907
 
 @dataclass
 class Scorer:
-    """Runs every detector over a session and folds the results together."""
+    """Runs every detector over a session and folds the results together.
 
-    detectors: list[Detector] | None = None
-    weights: dict[str, float] | None = None
+    Detectors that abstain (too little data) are left out of the weighted mean
+    and the remaining weights are renormalized. When every detector abstains the
+    combined score is None and no verdict is given.
+    """
+
+    detectors: list[Detector] = field(default_factory=default_detectors)
+    weights: dict[str, float] = field(default_factory=lambda: dict(DEFAULT_WEIGHTS))
     threshold: float = DEFAULT_THRESHOLD
 
     def __post_init__(self) -> None:
-        if self.detectors is None:
-            self.detectors = default_detectors()
-        if self.weights is None:
-            self.weights = dict(DEFAULT_WEIGHTS)
         if not 0.0 <= self.threshold <= 1.0:
             raise ValueError("threshold must be in [0, 1]")
         missing = [d.name for d in self.detectors if d.name not in self.weights]
@@ -58,20 +60,21 @@ class Scorer:
         if any(w < 0 for w in self.weights.values()):
             raise ValueError("weights must be non-negative")
 
-    def detector_scores(self, arrays: SessionArrays) -> dict[str, float]:
-        assert self.detectors is not None
+    def detector_scores(self, arrays: SessionArrays) -> dict[str, float | None]:
         return {d.name: d.score(arrays) for d in self.detectors}
 
-    def combine(self, scores: dict[str, float]) -> float:
-        """Weighted mean over the detectors present, renormalized."""
-        assert self.weights is not None
-        total_w = sum(self.weights[name] for name in scores)
+    def combine(self, scores: Mapping[str, float | None]) -> float | None:
+        """Weighted mean over the detectors that produced a score, renormalized."""
+        present = {name: v for name, v in scores.items() if v is not None}
+        total_w = sum(self.weights[name] for name in present)
         if total_w <= 0:
-            return 0.0
-        acc = sum(self.weights[name] * value for name, value in scores.items())
+            return None
+        acc = sum(self.weights[name] * value for name, value in present.items())
         return min(1.0, max(0.0, acc / total_w))
 
-    def score_arrays(self, arrays: SessionArrays) -> tuple[float, dict[str, float]]:
+    def score_arrays(
+        self, arrays: SessionArrays
+    ) -> tuple[float | None, dict[str, float | None]]:
         scores = self.detector_scores(arrays)
         return self.combine(scores), scores
 
@@ -82,6 +85,7 @@ class Scorer:
             score=combined,
             detector_scores=scores,
             threshold=self.threshold,
-            verdict=combined >= self.threshold,
+            verdict=None if combined is None else combined >= self.threshold,
+            insufficient_data=combined is None,
             n_events=len(session.events),
         )

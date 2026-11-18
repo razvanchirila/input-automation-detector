@@ -22,7 +22,8 @@ STROKE_GAP_S = 0.12
 # Strokes shorter than this carry no usable curvature information.
 MIN_STROKE_POINTS = 6
 
-# Neutral score returned when a detector has too little data to say anything.
+# Fallback for degenerate arithmetic (non-finite values, zero-width ramps). Too
+# little data is not this case: detectors return None and the scorer drops them.
 NEUTRAL = 0.5
 
 
@@ -70,12 +71,13 @@ class Detector(Protocol):
     """A single independent signal.
 
     Implementations must be pure and stateless: the same SessionArrays must always
-    yield the same score, in [0, 1], higher meaning more bot-like.
+    yield the same score, in [0, 1], higher meaning more bot-like. A detector that
+    has too little data to decide returns None (abstains) instead of guessing.
     """
 
     name: str
 
-    def score(self, s: SessionArrays) -> float: ...
+    def score(self, s: SessionArrays) -> float | None: ...
 
 
 def clamp01(v: float) -> float:

@@ -56,6 +56,34 @@ def test_combine_renormalizes_when_detectors_are_missing(scorer):
             assert scorer.combine({n: 0.0 for n in subset}) == pytest.approx(0.0)
 
 
+def test_combine_ignores_abstaining_detectors(scorer):
+    """None means "no data", so it must not pull the score toward any value."""
+    for name in NAMES:
+        scores: dict[str, float | None] = {n: 0.2 for n in NAMES}
+        scores[name] = None
+        assert scorer.combine(scores) == pytest.approx(0.2)
+
+
+def test_combine_returns_none_when_every_detector_abstains(scorer):
+    assert scorer.combine({n: None for n in NAMES}) is None
+    assert scorer.combine({}) is None
+
+
+def test_all_abstaining_session_gets_no_verdict():
+    class Abstainer:
+        name = "interval_regularity"
+
+        def score(self, s: SessionArrays) -> float | None:
+            return None
+
+    res = Scorer(detectors=[Abstainer()]).score_session(
+        generate_session(kind="bot_naive", seed=1)
+    )
+    assert res.score is None
+    assert res.verdict is None
+    assert res.insufficient_data is True
+
+
 def test_weights_are_a_normalized_non_negative_set():
     assert all(w >= 0 for w in DEFAULT_WEIGHTS.values())
     assert sum(DEFAULT_WEIGHTS.values()) == pytest.approx(1.0)
@@ -64,6 +92,7 @@ def test_weights_are_a_normalized_non_negative_set():
 def test_verdict_follows_threshold(scorer):
     for session_kind in ("human", "bot_naive", "bot_evasive"):
         res = scorer.score_session(generate_session(kind=session_kind, seed=12))
+        assert res.score is not None
         assert res.verdict == (res.score >= res.threshold)
         assert res.threshold == DEFAULT_THRESHOLD
 

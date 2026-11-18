@@ -37,7 +37,11 @@ KIND_ORDER = ("human", "bot_naive", "bot_evasive")
 
 
 def build(n_sessions: int, seed: int) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-    """Return (per_detector_scores [n, k], combined [n], kinds [n])."""
+    """Return (per_detector_scores [n, k], combined [n], kinds [n]).
+
+    An abstaining detector is stored as NaN. A session where every detector
+    abstained gets no verdict, so it is stored as 0.0: never flagged.
+    """
     scorer = Scorer()
     names = [d.name for d in default_detectors()]
     rows: list[list[float]] = []
@@ -51,8 +55,8 @@ def build(n_sessions: int, seed: int) -> tuple[np.ndarray, np.ndarray, np.ndarra
         evasive_share_of_bots=EVASIVE_SHARE_OF_BOTS,
     ):
         score, per = scorer.score_arrays(arrays)
-        rows.append([per[n] for n in names])
-        combined.append(score)
+        rows.append([np.nan if per[n] is None else per[n] for n in names])
+        combined.append(0.0 if score is None else score)
         kinds.append(kind)
 
     return np.asarray(rows), np.asarray(combined), np.asarray(kinds)
@@ -139,21 +143,25 @@ def main() -> int:
     op_cons = operating_point(s_te, y_te, k_te, t_cons)
     auc = float(roc_auc_score(y_te, s_te))
 
-    det_auc = {n: float(roc_auc_score(y_te, d_te[:, i])) for i, n in enumerate(det_names)}
+    # Per-detector AUC is measured only on sessions where that detector scored.
+    det_auc = {n: _auc(y_te, d_te[:, i]) for i, n in enumerate(det_names)}
 
     # Per-detector AUC restricted to evasive-vs-human, the interesting contrast.
     sub = (k_te == "bot_evasive") | (k_te == "human")
     y_ev = (k_te[sub] == "bot_evasive").astype(int)
-    det_auc_ev = {
-        n: float(roc_auc_score(y_ev, d_te[sub][:, i])) for i, n in enumerate(det_names)
-    }
+    det_auc_ev = {n: _auc(y_ev, d_te[sub][:, i]) for i, n in enumerate(det_names)}
     auc_ev = float(roc_auc_score(y_ev, s_te[sub]))
 
     means = {
-        k: {n: float(per_det[kinds == k][:, i].mean()) for i, n in enumerate(det_names)}
+        k: {
+            n: float(np.nanmean(per_det[kinds == k][:, i]))
+            for i, n in enumerate(det_names)
+        }
         | {"combined": float(combined[kinds == k].mean())}
         for k in KIND_ORDER
     }
+    abstained = {n: int(np.isnan(per_det[:, i]).sum()) for i, n in enumerate(det_names)}
+    no_verdict = int(np.isnan(per_det).all(axis=1).sum())
     counts = {k: int((kinds == k).sum()) for k in KIND_ORDER}
 
     report = render(
@@ -174,12 +182,19 @@ def main() -> int:
         n_evasive=int((k_te == "bot_evasive").sum()),
         means=means,
         det_names=det_names,
+        abstained=abstained,
+        no_verdict=no_verdict,
     )
 
     print(report)
     RESULTS_PATH.write_text(report, encoding="utf-8")
     print(f"written to {RESULTS_PATH}")
     return 0
+
+
+def _auc(y: np.ndarray, scores: np.ndarray) -> float:
+    ok = ~np.isnan(scores)
+    return float(roc_auc_score(y[ok], scores[ok]))
 
 
 def _op_table(op: dict[str, float]) -> list[str]:
@@ -223,6 +238,9 @@ def render(**k) -> str:
     A(f"| Bots that are evasive | {k['counts']['bot_evasive'] / max(1, n_bots):.1%} |")
     A(f"| Train / test split | {k['n_train']:,} / {k['n_test']:,} |")
     A(f"| Generate + score wall time | {k['gen_s']:.1f} s |")
+    A(f"| Sessions with no verdict (all detectors abstained) | {k['no_verdict']:,} |")
+    for n in det_names:
+        A(f"| `{n}` abstained (too little data) | {k['abstained'][n]:,} |")
     A("")
     A("## Ranking quality (threshold-free, test half)")
     A("")

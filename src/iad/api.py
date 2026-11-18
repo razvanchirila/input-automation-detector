@@ -51,7 +51,8 @@ def score(session: Session) -> ScoreResult:
 
     Returns the combined score, every detector's individual score, and the
     boolean verdict at the configured threshold. A detector with too little data
-    to decide returns 0.5 rather than guessing.
+    abstains (null) and is left out of the combined score; if all of them abstain
+    the response has `insufficient_data: true` and a null score and verdict.
     """
     try:
         return _scorer.score_session(session)
@@ -79,8 +80,9 @@ class Demo(BaseModel):
     kind: SessionKind
     seed: int | None
     result: ScoreResult
-    label_matches_verdict: bool = Field(
-        description="True when the verdict agrees with the generator's label."
+    label_matches_verdict: bool | None = Field(
+        description="True when the verdict agrees with the generator's label; "
+        "null when no verdict was given."
     )
 
 
@@ -96,5 +98,7 @@ def demo(
         kind=kind,
         seed=seed,
         result=result,
-        label_matches_verdict=result.verdict == (kind != "human"),
+        label_matches_verdict=(
+            None if result.verdict is None else result.verdict == (kind != "human")
+        ),
     )

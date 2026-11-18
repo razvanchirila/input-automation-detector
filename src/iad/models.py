@@ -81,10 +81,22 @@ class ScoreResult(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     session_id: str
-    score: float = Field(ge=0.0, le=1.0, description="Combined bot likelihood.")
-    detector_scores: dict[str, float] = Field(
-        description="Per-detector score in [0,1]; higher means more bot-like."
+    score: float | None = Field(
+        ge=0.0,
+        le=1.0,
+        description="Combined bot likelihood; null when no detector had enough data.",
+    )
+    detector_scores: dict[str, float | None] = Field(
+        description=(
+            "Per-detector score in [0,1]; higher means more bot-like. "
+            "null means the detector abstained for lack of data."
+        )
     )
     threshold: float = Field(ge=0.0, le=1.0)
-    verdict: bool = Field(description="True when score >= threshold.")
+    verdict: bool | None = Field(
+        description="True when score >= threshold; null when insufficient_data."
+    )
+    insufficient_data: bool = Field(
+        description="True when every detector abstained, so no verdict is given."
+    )
     n_events: int = Field(ge=0)

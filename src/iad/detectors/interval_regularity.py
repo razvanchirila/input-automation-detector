@@ -1,4 +1,4 @@
-﻿"""Detector 1: regularity of the action rhythm.
+"""Detector 1: regularity of the action rhythm.
 
 Human inter-action intervals are heavy-tailed: a broad lognormal body plus
 occasional multi-second pauses (reading, hesitating, being interrupted).
@@ -20,7 +20,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from iad.detectors.base import NEUTRAL, SessionArrays, clamp01, ramp
+from iad.detectors.base import SessionArrays, clamp01, ramp
 
 MIN_INTERVALS = 8
 
@@ -76,14 +76,14 @@ def _clustering_score(d: np.ndarray) -> float:
 class IntervalRegularityDetector:
     name = "interval_regularity"
 
-    def score(self, s: SessionArrays) -> float:
+    def score(self, s: SessionArrays) -> float | None:
         t = s.t_action
         if t.size < MIN_INTERVALS + 1:
-            return NEUTRAL
+            return None
         d = np.diff(t)
         d = d[d > 0]
         if d.size < MIN_INTERVALS:
-            return NEUTRAL
+            return None
 
         parts = (_dispersion_score(d), _spread_score(d), _clustering_score(d))
         return clamp01(float(np.dot(parts, WEIGHTS)))

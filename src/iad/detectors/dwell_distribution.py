@@ -1,4 +1,4 @@
-﻿"""Detector 3: shape of the press-duration distribution.
+"""Detector 3: shape of the press-duration distribution.
 
 Key and button dwell times in humans are broad and right-skewed - roughly
 lognormal with a fat right tail from keys held during a moment of thought.
@@ -29,7 +29,6 @@ import numpy as np
 from scipy import stats
 
 from iad.detectors.base import (
-    NEUTRAL,
     SessionArrays,
     band_deviation,
     clamp01,
@@ -80,11 +79,11 @@ def _quantization_score(d: np.ndarray) -> float:
 class DwellDistributionDetector:
     name = "dwell_distribution"
 
-    def score(self, s: SessionArrays) -> float:
+    def score(self, s: SessionArrays) -> float | None:
         d = s.dwell_ms
         d = d[d > 0]
         if d.size < MIN_DWELLS:
-            return NEUTRAL
+            return None
 
         parts = (
             _shape_score(d),
