@@ -7,6 +7,7 @@ the host, so running this on Windows or macOS yields the same file.
 from __future__ import annotations
 
 import json
+import re
 import subprocess
 import sys
 import tempfile
@@ -14,6 +15,10 @@ import tomllib
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
+
+
+def _norm(name: str) -> str:
+    return re.sub(r"[-_.]+", "-", name).lower()
 
 
 def main() -> int:
@@ -47,8 +52,7 @@ def main() -> int:
         )
         installed = json.loads(report.read_text(encoding="utf-8"))["install"]
     pins = sorted(
-        f"{i['metadata']['name'].lower()}=={i['metadata']['version']}"
-        for i in installed
+        f"{_norm(i['metadata']['name'])}=={i['metadata']['version']}" for i in installed
     )
     header = "# Runtime lock for the container image. Regenerate: make lock\n"
     (ROOT / "requirements.txt").write_text(
