@@ -1,7 +1,9 @@
-.git
-.github
-.venv
-.pytest_cache
-__pycache__
-*.pyc
-tests
+# Allow-list: only what the image build reads.
+*
+!pyproject.toml
+!requirements.txt
+!README.md
+!src/
+**/__pycache__
+**/*.py[cod]
+**/*.egg-info
