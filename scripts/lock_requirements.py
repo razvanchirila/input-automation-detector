@@ -51,12 +51,12 @@ def main() -> int:
             check=True,
         )
         installed = json.loads(report.read_text(encoding="utf-8"))["install"]
-    pins = sorted(
-        f"{_norm(i['metadata']['name'])}=={i['metadata']['version']}" for i in installed
-    )
+    meta = [i["metadata"] for i in installed]
+    versions = {_norm(m["name"]): m["version"] for m in meta}
+    pins = [f"{name}=={versions[name]}" for name in sorted(versions)]
     header = "# Runtime lock for the container image. Regenerate: make lock\n"
     (ROOT / "requirements.txt").write_text(
-        header + "\n".join(pins) + "\n", encoding="utf-8"
+        header + "\n".join(pins) + "\n", encoding="utf-8", newline="\n"
     )
     print(f"wrote {len(pins)} pins to requirements.txt")
     return 0
