@@ -6,6 +6,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from iad.api import app
+from iad.config import settings
 from iad.scoring import DEFAULT_THRESHOLD
 from iad.synth import KINDS, generate_session
 
@@ -94,6 +95,21 @@ def test_demo_endpoint(client, kind):
 def test_score_rejects_malformed_session(client):
     r = client.post("/score", json={"session_id": "x", "events": []})
     assert r.status_code == 422
+
+
+def test_score_rejects_oversized_session(client):
+    limit = settings.max_events
+    events = [{"t": i * 0.01, "type": "key_down", "code": "a"} for i in range(limit + 1)]
+    r = client.post("/score", json={"session_id": "big", "events": events})
+    assert r.status_code == 422
+    assert r.json()["detail"][0]["type"] == "too_long"
+
+
+def test_score_accepts_session_at_the_limit(client):
+    limit = settings.max_events
+    events = [{"t": i * 0.01, "type": "key_down", "code": "a"} for i in range(limit)]
+    r = client.post("/score", json={"session_id": "edge", "events": events})
+    assert r.status_code == 200
 
 
 def test_score_rejects_unordered_events(client):

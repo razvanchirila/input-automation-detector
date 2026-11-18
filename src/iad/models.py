@@ -5,6 +5,7 @@ from __future__ import annotations
 from enum import Enum
 from typing import Literal
 
+from iad.config import settings
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
@@ -55,7 +56,11 @@ class Session(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     session_id: str = Field(min_length=1, max_length=128)
-    events: list[InputEvent] = Field(min_length=2)
+    events: list[InputEvent] = Field(
+        min_length=2,
+        max_length=settings.max_events,
+        description="Ordered events; the cap is set by IAD_MAX_EVENTS.",
+    )
     label: SessionLabel | None = Field(
         default=None, description="Ground truth, present only in generated corpora."
     )

@@ -51,6 +51,9 @@ If every detector abstains, as for a two-event session, the response carries
 `"insufficient_data": true` with `score` and `verdict` both `null`, so a short session is
 never flagged.
 
+A session may carry at most `IAD_MAX_EVENTS` events (default `10000`); a larger body is
+rejected with `422` before any detector runs.
+
 ## The three detectors
 
 Each returns a float in `[0,1]`, higher meaning more bot-like. They are built to fail
