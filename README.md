@@ -1,49 +1,61 @@
 # Input Automation Detector
 
-A service that scores a burst of input telemetry — mouse moves, clicks, keystrokes — for
-how likely it is to have been produced by automation rather than a person. It runs three
-independent statistical detectors over the event stream (timing regularity, cursor path
-geometry, key-press duration shape), folds them into one explainable score, and exposes
-the whole thing over HTTP. The interesting part is not that it catches obvious bots; a
-constant-delay, straight-line script is trivial. It is that the evaluation corpus includes
-a deliberately humanized *evasive* population — jittered lognormal timing, Bezier cursor
-paths, overshoot, human-shaped dwell distributions — and the reported metrics are measured
-against that, so the numbers below are the honest hard case rather than a flattering one.
+[![ci](https://github.com/razvanchirila/input-automation-detector/actions/workflows/ci.yml/badge.svg)](https://github.com/razvanchirila/input-automation-detector/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+
+An HTTP service that scores a burst of mouse and keyboard telemetry for how likely it is
+to come from automation, using three independent statistical detectors and an
+explainable weighted score.
+
+## Results
+
+Held-out half of a 12,000-session synthetic corpus in which 45% of the bots are humanized
+("evasive"); only the decision threshold is fitted, on the other half.
+
+- ROC AUC 0.966 for all bots vs humans, 0.923 for evasive bots vs humans.
+- Max-F1 threshold (0.1923): precision 0.895, recall 0.894, false-positive rate 10.5%; evasive-bot recall 0.76.
+- Conservative threshold (0.2907): precision 0.989, recall 0.723, false-positive rate 0.84%; evasive-bot recall 0.37.
+- The data is synthetic, so these figures measure separation of this generator's populations, not real-world accuracy.
+
+## Architecture
+
+```mermaid
+flowchart LR
+  client[Client] -->|POST /score| api[FastAPI]
+  api --> d1[interval_regularity]
+  api --> d2[cursor_curvature]
+  api --> d3[dwell_distribution]
+  d1 --> scorer[Weighted scorer]
+  d2 --> scorer
+  d3 --> scorer
+  scorer --> verdict[verdict or insufficient_data]
+  api -->|/metrics| prom[Prometheus] --> graf[Grafana]
+  ci[GitHub Actions] -->|image| ghcr[GHCR]
+```
 
 ## Quick start
 
 ```bash
-python -m venv .venv
-.venv\Scripts\activate          # Windows
-# source .venv/bin/activate     # Linux / macOS
-pip install -r requirements.txt -e ".[dev,eval]"
-
-pytest
-python eval/evaluate.py         # regenerates eval/results.md
-uvicorn iad.api:app --reload --app-dir src
+docker compose up --build -d
+curl -s "http://127.0.0.1:8000/demo?kind=bot_evasive&seed=1"
 ```
 
-Then open http://127.0.0.1:8000/docs, or try it without any data of your own:
+Interactive API docs are at http://127.0.0.1:8000/docs. To score your own payload, fetch
+an example with `GET /synth` and post it back to `POST /score`:
 
 ```bash
-curl "http://127.0.0.1:8000/synth?kind=bot_evasive&seed=1" > s.json
-curl -X POST http://127.0.0.1:8000/score -H "content-type: application/json" -d @s.json
-```
-
-With Docker:
-
-```bash
-docker compose up --build         # http://127.0.0.1:8000
+curl -s "http://127.0.0.1:8000/synth?kind=human&seed=1" > s.json
+curl -s -X POST http://127.0.0.1:8000/score -H "content-type: application/json" -d @s.json
 ```
 
 ## API
 
 | Method | Path | Purpose |
 |---|---|---|
-| `POST` | `/score` | Score a session. Returns the combined score, every detector's score, and a boolean verdict at the configured threshold. |
-| `GET` | `/health` | Liveness plus the active detectors, weights and threshold. |
-| `GET` | `/synth` | Generate an example session (`kind` = `human` / `bot_naive` / `bot_evasive`, optional `seed`) so the API can be exercised without real capture. |
-| `GET` | `/demo` | Generate and immediately score one session. Convenience wrapper. |
+| `POST` | `/score` | Score a session. Returns the combined score, every detector's score, and a verdict at the configured threshold. |
+| `GET` | `/synth` | Generate an example session (`kind` = `human` / `bot_naive` / `bot_evasive`, optional `seed`). |
+| `GET` | `/demo` | Generate and immediately score one session. |
+| `GET` | `/health` | Status plus the active detectors, weights and threshold. |
 
 A detector with too little data to decide abstains: its entry in `detector_scores` is
 `null` and it is left out of the weighted mean, whose remaining weights are renormalized.
@@ -51,24 +63,112 @@ If every detector abstains, as for a two-event session, the response carries
 `"insufficient_data": true` with `score` and `verdict` both `null`, so a short session is
 never flagged.
 
-A session may carry at most `IAD_MAX_EVENTS` events (default `10000`); a larger body is
-rejected with `422` before any detector runs.
+```json
+{"session_id": "tiny", "score": null, "detector_scores": {"interval_regularity": null,
+ "cursor_curvature": null, "dwell_distribution": null}, "threshold": 0.1923,
+ "verdict": null, "insufficient_data": true, "n_events": 2}
+```
+
+## Operations
+
+**Probes and metrics**
+
+| Path | Purpose |
+|---|---|
+| `GET /livez` | Liveness. Always `200` while the process serves HTTP; used by the Docker `HEALTHCHECK`. |
+| `GET /readyz` | Readiness. `503 {"status":"starting"}` until a warm-up scoring pass has run at startup, then `200`. |
+| `GET /metrics` | Prometheus exposition. |
+
+Custom series: `iad_http_requests_total{method,route,status}`,
+`iad_http_request_duration_seconds{method,route}` (histogram), `iad_score` (histogram of
+combined scores) and `iad_verdicts_total{verdict="bot"|"human"|"insufficient"}`. Routes
+are labelled by template, and unknown paths collapse to `unmatched`, so label cardinality
+stays bounded.
+
+**Configuration** (environment variables)
+
+| Variable | Default | Effect |
+|---|---|---|
+| `IAD_MAX_EVENTS` | `10000` | Maximum events per session. Larger bodies get `422` at validation, before any detector runs. |
+| `IAD_LOG_LEVEL` | `INFO` | Root log level. |
+| `WEB_CONCURRENCY` | `1` | Uvicorn worker processes. Prefer more replicas over more workers. |
+| `PROMETHEUS_MULTIPROC_DIR` | unset | Required when `WEB_CONCURRENCY > 1`: an empty writable directory (e.g. `/tmp/metrics`) so `/metrics` aggregates all workers. |
+| `FORWARDED_ALLOW_IPS` | `127.0.0.1` | Proxies whose `X-Forwarded-*` headers uvicorn trusts (`--proxy-headers` is on). Set it to your load balancer's address. |
+
+**Logging.** One JSON object per line on stdout. Every request produces one `iad.access`
+line, and every line written during a request carries its `request_id`. The ID is taken
+from an incoming `X-Request-ID` header when it is 1-128 characters of `[A-Za-z0-9._:-]`,
+generated otherwise, and echoed back in the response header.
+
+```json
+{"ts": "2026-11-18T19:09:08.952Z", "level": "info", "logger": "iad.access", "msg": "request", "request_id": "demo-1", "method": "GET", "path": "/demo", "route": "/demo", "status": 200, "duration_ms": 5.17}
+```
+
+**Container.** Multi-stage build on a digest-pinned `python:3.11-slim`; the runtime stage
+installs prebuilt wheels from the runtime lock only (no test or evaluation dependencies),
+runs as UID 10001, and stops gracefully on `SIGTERM` within 20 s. Compose runs it with a
+read-only root filesystem, a tmpfs `/tmp`, all capabilities dropped,
+`no-new-privileges`, CPU/memory/pid limits, and ports bound to localhost.
+
+**Monitoring profile.**
+
+```bash
+docker compose --profile monitoring up --build -d
+```
+
+Adds Prometheus on http://127.0.0.1:9090 (scraping `api:8000/metrics` every 5 s) and
+Grafana on http://127.0.0.1:3000 with a provisioned datasource and an *Input Automation
+Detector* dashboard: request rate, p95 latency, verdict counts and the score histogram.
+Anonymous viewing is on; the admin password comes from `GRAFANA_ADMIN_PASSWORD`
+(default `admin`, local use only).
+
+**CI** (`.github/workflows/ci.yml`) runs on pushes to `main`/`master`, `v*.*.*` tags and
+pull requests, with a read-only token by default and superseded runs cancelled:
+
+1. `lint`: `ruff check`, `ruff format --check`, `mypy` (strict).
+2. `test`: `pytest` with coverage, plus a 1,000-session evaluation smoke run.
+3. `security`: `pip-audit` over the runtime lock.
+4. `docker`: Buildx build with the GitHub Actions cache, container smoke test
+   (`/livez`, `/readyz`, a scored session, `/metrics`), Trivy scan failing on fixed
+   `CRITICAL`/`HIGH` vulnerabilities.
+5. `publish` (not on pull requests): push to `ghcr.io/razvanchirila/input-automation-detector`
+   tagged with the commit SHA, `latest` on the default branch, and `X.Y.Z` / `X.Y` on
+   version tags. This is the only job with `packages: write`.
+
+Dependabot opens weekly updates for pip, the Docker base image, Compose images and
+Actions.
+
+## Development
+
+```bash
+python -m venv .venv
+source .venv/bin/activate       # Windows: .venv\Scripts\activate
+pip install -r requirements.txt -e ".[dev,eval]"
+```
+
+`make lint`, `make typecheck`, `make test`, `make eval`, `make up`, `make monitoring`;
+`make help` lists the rest. Each target is a single command, so on Windows without GNU
+make run the line from the `Makefile` directly. Dependencies are declared in
+`pyproject.toml` (runtime, plus `dev` and `eval` extras); `requirements.txt` is the
+generated, fully pinned runtime lock used by the image (`make lock`).
+`pre-commit install` enables the ruff and whitespace hooks.
 
 ## The three detectors
 
-Each returns a float in `[0,1]`, higher meaning more bot-like. They are built to fail
+Each returns a float in `[0,1]`, higher meaning more bot-like, or abstains (`None`) when it
+has too little data. They are built to fail
 independently, so that defeating one does not defeat the others.
 
-**Interval regularity** (`src/iad/detectors/interval_regularity.py`) — Human inter-action
+**Interval regularity** (`src/iad/detectors/interval_regularity.py`). Human inter-action
 delays are heavy-tailed: a broad lognormal body plus real multi-second pauses. Three
 sub-signals: the coefficient of variation of the intervals; the normalized Shannon entropy
 of the scale-free log-interval histogram, which measures distribution *shape* so that
 injecting two fake pauses into an otherwise metronomic stream does not rescue it; and the
 share of intervals that have a near-duplicate partner within 3% relative distance, which
-catches quantized or replayed schedules. Only press events feed this detector — cursor
+catches quantized or replayed schedules. Only press events feed this detector; cursor
 sampling rate is a property of the capture layer, not the actor.
 
-**Cursor path curvature** (`src/iad/detectors/cursor_curvature.py`) — A human reach is
+**Cursor path curvature** (`src/iad/detectors/cursor_curvature.py`). A human reach is
 ballistic, overshoots, then corrects, with tremor throughout. Strokes are re-derived from
 resting gaps in the timestamps rather than trusted from the producer. Per stroke it
 computes path efficiency (end-to-end distance over travelled length), the rate at which the
@@ -77,7 +177,7 @@ start→end axis. The reversal rate is scored as a two-sided band, not a thresho
 spline-smoothed bot sits below the human band and a bot faking tremor with white noise sits
 above it, and both are non-human.
 
-**Dwell time distribution** (`src/iad/detectors/dwell_distribution.py`) — Press durations in
+**Dwell time distribution** (`src/iad/detectors/dwell_distribution.py`). Press durations in
 humans are broad and right-skewed. Because mean dwell varies hugely between people and
 keyboards, every sub-signal is scale-free: dwells are normalized by their own median first.
 It compares the distribution *shape* via a Kolmogorov-Smirnov distance between
@@ -92,12 +192,12 @@ makes a flag explainable to whoever has to action it; it is bounded in `[0,1]` b
 construction; and nothing is fitted to the corpus except the single decision threshold, so
 the metrics below are not a model grading its own homework.
 
-## Results
+## Detailed results
 
 Measured on a held-out half of a 12,000-session synthetic corpus, seed `20260915`.
 Full report, regenerated by `python eval/evaluate.py`: [`eval/results.md`](eval/results.md).
 
-Corpus: 6,000 human, 3,303 naive bot, 2,697 evasive bot — 45% of all bots are evasive.
+Corpus: 6,000 human, 3,303 naive bot, 2,697 evasive bot; 45% of all bots are evasive.
 Split 6,000 train / 6,000 test; the training half is used only to pick the threshold.
 
 **Ranking quality** (threshold-free):
@@ -107,20 +207,20 @@ Split 6,000 train / 6,000 test; the training half is used only to pick the thres
 | All bots vs human | 0.9660 |
 | Evasive bots vs human | 0.9226 |
 
-**Operating point A — max-F1** (threshold 0.1923, chosen on the training half):
+**Operating point A: max-F1** (threshold 0.1923, chosen on the training half):
 
 | Precision | Recall | F1 | Accuracy | FPR |
 |---|---|---|---|---|
 | 0.8954 | 0.8942 | 0.8948 | 0.8947 | 0.1049 |
 
-**Operating point B — conservative**, sub-1% false positives (threshold 0.2907). This is
+**Operating point B: conservative**, sub-1% false positives (threshold 0.2907). This is
 the point that matters if the downstream action is a ban rather than a review queue:
 
 | Precision | Recall | F1 | Accuracy | FPR |
 |---|---|---|---|---|
 | 0.9886 | 0.7226 | 0.8350 | 0.8568 | 0.0084 |
 
-**Recall split, naive vs evasive** — the most informative number here:
+**Recall split, naive vs evasive**, the most informative number here:
 
 | Population | At max-F1 | At sub-1% FPR |
 |---|---|---|
@@ -128,7 +228,7 @@ the point that matters if the downstream action is a ban rather than a review qu
 | Evasive bot | 0.7596 | 0.3696 |
 
 Naive recall is 1.00 because a constant-delay, straight-line, fixed-dwell script is
-trivially separable — that figure says nothing about detector quality. Evasive recall is
+trivially separable, so that figure says nothing about detector quality. Evasive recall is
 the real result: roughly three quarters of humanized automation is caught when 10% false
 positives are tolerable, and roughly a third when they are not.
 
@@ -139,7 +239,7 @@ positives are tolerable, and roughly a third when they are not.
 | `interval_regularity` | 0.34 | 0.9206 | 0.8196 |
 | `cursor_curvature` | 0.36 | 0.9367 | 0.8561 |
 | `dwell_distribution` | 0.30 | 0.8689 | 0.7019 |
-| **combined** | — | **0.9660** | **0.9226** |
+| **combined** | - | **0.9660** | **0.9226** |
 
 The combined score beats every individual detector on both contrasts, which is the
 justification for carrying three signals instead of the best one.
@@ -155,9 +255,9 @@ justification for carrying three signals instead of the best one.
   score lower. The dwell-shape sub-signal is already near-blind to it: measured in
   isolation, the KS statistic separates evasive bots from humans at AUC 0.50.
 - The combined score is a **ranking statistic, not a calibrated probability**. Its absolute
-  value is not meaningful — humans average 0.107 and evasive bots 0.259 — only the ordering
+  value is not meaningful (humans average 0.107 and evasive bots 0.259); only the ordering
   and the fitted threshold are. Calibration would need real labelled data.
-- Sessions are short bursts of roughly 15–23 action units. Sub-signals that need sample
+- Sessions are short bursts of roughly 15 to 23 action units. Sub-signals that need sample
   size, notably dwell skewness, are noisy at this length and carry the smallest weights.
 - `tests/test_synth.py::test_evasive_bot_overlaps_humans_on_raw_statistics` is a tripwire:
   it fails if a future change to the generator makes any raw statistic separable on its
@@ -166,19 +266,23 @@ justification for carrying three signals instead of the best one.
 ## Layout
 
 ```
-src/iad/models.py          pydantic InputEvent / Session / ScoreResult
-src/iad/detectors/         base protocol + numeric view, one module per detector
-src/iad/scoring.py         weighted-mean combiner, thresholds
-src/iad/synth.py           three-population synthetic generator
-src/iad/api.py             FastAPI app
-eval/evaluate.py           builds corpus, scores, writes eval/results.md
-tests/                     pytest suite
+src/iad/models.py              pydantic InputEvent / Session / ScoreResult
+src/iad/detectors/             base protocol + numeric view, one module per detector
+src/iad/scoring.py             weighted-mean combiner, thresholds
+src/iad/synth.py               three-population synthetic generator
+src/iad/api.py                 FastAPI app, probes, /metrics
+src/iad/observability.py       JSON logging, request IDs, Prometheus metrics
+src/iad/config.py              environment settings
+eval/evaluate.py               builds corpus, scores, writes eval/results.md
+tests/                         pytest suite
+monitoring/                    Prometheus config, Grafana provisioning and dashboard
+scripts/lock_requirements.py   regenerates the runtime lock
 ```
 
 Detectors never see pydantic models. They read a `SessionArrays`, a flat numpy view
 derived from the raw event stream, which keeps a 12,000-session sweep at ~22 s wall time
-and guarantees that the evaluation path and the API path compute identical features —
-asserted by `test_array_fast_path_matches_pydantic_path`.
+and guarantees that the evaluation path and the API path compute identical features, which
+`test_array_fast_path_matches_pydantic_path` asserts.
 
 ## Notes on reproducing
 
@@ -186,6 +290,6 @@ asserted by `test_array_fast_path_matches_pydantic_path`.
 `20260915`) and is overwritten by any invocation of `eval/evaluate.py`, including a
 smaller `--sessions` run. Re-run without arguments to restore it.
 
-Detector calibration constants — ramp endpoints and band centres — were set from the
+Detector calibration constants (ramp endpoints and band centres) were set from the
 measured human population and are fixed in the library. They are not re-fitted per run,
 and the test half is never used to choose them.
