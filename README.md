@@ -18,7 +18,7 @@ python -m venv .venv
 # source .venv/bin/activate     # Linux / macOS
 pip install -r requirements.txt -e ".[dev,eval]"
 
-pytest                          # 66 tests
+pytest
 python eval/evaluate.py         # regenerates eval/results.md
 uvicorn iad.api:app --reload --app-dir src
 ```
@@ -26,7 +26,7 @@ uvicorn iad.api:app --reload --app-dir src
 Then open http://127.0.0.1:8000/docs, or try it without any data of your own:
 
 ```bash
-curl -X POST "http://127.0.0.1:8000/synth?kind=bot_evasive&seed=1" > s.json
+curl "http://127.0.0.1:8000/synth?kind=bot_evasive&seed=1" > s.json
 curl -X POST http://127.0.0.1:8000/score -H "content-type: application/json" -d @s.json
 ```
 
@@ -42,8 +42,8 @@ docker compose up --build         # http://127.0.0.1:8000
 |---|---|---|
 | `POST` | `/score` | Score a session. Returns the combined score, every detector's score, and a boolean verdict at the configured threshold. |
 | `GET` | `/health` | Liveness plus the active detectors, weights and threshold. |
-| `POST` | `/synth` | Generate an example session (`kind` = `human` / `bot_naive` / `bot_evasive`, optional `seed`) so the API can be exercised without real capture. |
-| `POST` | `/demo` | Generate and immediately score one session. Convenience wrapper. |
+| `GET` | `/synth` | Generate an example session (`kind` = `human` / `bot_naive` / `bot_evasive`, optional `seed`) so the API can be exercised without real capture. |
+| `GET` | `/demo` | Generate and immediately score one session. Convenience wrapper. |
 
 A detector with too little data to decide abstains: its entry in `detector_scores` is
 `null` and it is left out of the weighted mean, whose remaining weights are renormalized.
@@ -172,7 +172,7 @@ src/iad/scoring.py         weighted-mean combiner, thresholds
 src/iad/synth.py           three-population synthetic generator
 src/iad/api.py             FastAPI app
 eval/evaluate.py           builds corpus, scores, writes eval/results.md
-tests/                     66 pytest tests
+tests/                     pytest suite
 ```
 
 Detectors never see pydantic models. They read a `SessionArrays`, a flat numpy view

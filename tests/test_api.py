@@ -29,7 +29,7 @@ def test_health(client):
 
 @pytest.mark.parametrize("kind", KINDS)
 def test_synth_returns_a_scorable_session(client, kind):
-    r = client.post("/synth", params={"kind": kind, "seed": 5})
+    r = client.get("/synth", params={"kind": kind, "seed": 5})
     assert r.status_code == 200
     body = r.json()
     assert body["label"] == kind
@@ -41,8 +41,8 @@ def test_synth_returns_a_scorable_session(client, kind):
 
 
 def test_synth_is_reproducible_over_http(client):
-    a = client.post("/synth", params={"kind": "human", "seed": 42}).json()
-    b = client.post("/synth", params={"kind": "human", "seed": 42}).json()
+    a = client.get("/synth", params={"kind": "human", "seed": 42}).json()
+    b = client.get("/synth", params={"kind": "human", "seed": 42}).json()
     assert a == b
 
 
@@ -85,7 +85,7 @@ def test_score_flags_naive_bot_and_clears_human(client):
 
 @pytest.mark.parametrize("kind", KINDS)
 def test_demo_endpoint(client, kind):
-    r = client.post("/demo", params={"kind": kind, "seed": 2})
+    r = client.get("/demo", params={"kind": kind, "seed": 2})
     assert r.status_code == 200
     body = r.json()
     assert body["kind"] == kind
@@ -143,8 +143,13 @@ def test_score_rejects_move_without_coordinates(client):
     assert r.status_code == 422
 
 
+def test_synth_and_demo_reject_post(client):
+    assert client.post("/synth").status_code == 405
+    assert client.post("/demo").status_code == 405
+
+
 def test_synth_rejects_unknown_kind(client):
-    assert client.post("/synth", params={"kind": "bot_perfect"}).status_code == 422
+    assert client.get("/synth", params={"kind": "bot_perfect"}).status_code == 422
 
 
 def _keys(n_presses: int) -> list[dict[str, object]]:

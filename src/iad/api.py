@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from typing import Annotated, Literal
 
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, Query
 from pydantic import BaseModel, Field
 
 from iad import __version__
@@ -57,20 +57,15 @@ def score(session: Session) -> ScoreResult:
     abstains (null) and is left out of the combined score; if all of them abstain
     the response has `insufficient_data: true` and a null score and verdict.
     """
-    try:
-        return _scorer.score_session(session)
-    except ValueError as exc:  # pragma: no cover - defensive
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return _scorer.score_session(session)
 
 
-@app.post("/synth", response_model=Session, tags=["scoring"])
+@app.get("/synth", response_model=Session, tags=["scoring"])
 def synth(kind: KindParam = "human", seed: SeedParam = None) -> Session:
     """Generate an example session so the API can be tried without real data.
 
     Feed the response straight back into `POST /score`.
     """
-    if kind not in KINDS:
-        raise HTTPException(status_code=422, detail=f"kind must be one of {KINDS}")
     return generate_session(kind=kind, seed=seed)
 
 
@@ -84,7 +79,7 @@ class Demo(BaseModel):
     )
 
 
-@app.post("/demo", response_model=Demo, tags=["scoring"])
+@app.get("/demo", response_model=Demo, tags=["scoring"])
 def demo(kind: KindParam = "human", seed: SeedParam = None) -> Demo:
     """Generate and immediately score a session. Convenience wrapper for demos."""
     session = synth(kind=kind, seed=seed)
