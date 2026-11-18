@@ -7,7 +7,13 @@ import pytest
 
 from iad.detectors.base import from_session
 from iad.models import DOWN_TYPES, UP_TYPES, EventType, Session
-from iad.synth import KINDS, generate_arrays, generate_corpus, generate_session
+from iad.synth import (
+    KINDS,
+    SessionKind,
+    generate_arrays,
+    generate_corpus,
+    generate_session,
+)
 
 
 @pytest.mark.parametrize("kind", KINDS)
@@ -36,8 +42,12 @@ def test_corpus_is_reproducible():
 
 
 def test_corpus_respects_requested_composition():
-    kinds = [k for _, k in generate_corpus(4000, seed=3, bot_share=0.5,
-                                           evasive_share_of_bots=0.45)]
+    kinds = [
+        k
+        for _, k in generate_corpus(
+            4000, seed=3, bot_share=0.5, evasive_share_of_bots=0.45
+        )
+    ]
     n = len(kinds)
     assert n == 4000
     humans = kinds.count("human")
@@ -103,7 +113,8 @@ def test_evasive_bot_overlaps_humans_on_raw_statistics():
     separable on its own, the reported metrics stop being honest. This test is
     the tripwire for that.
     """
-    def stats_for(kind: str):
+
+    def stats_for(kind: SessionKind):
         rng = np.random.default_rng(55)
         cv_i, cv_d, eff = [], [], []
         for _ in range(80):

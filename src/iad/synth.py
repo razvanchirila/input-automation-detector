@@ -29,12 +29,13 @@ so pixel quantization is not a discriminating artifact.
 
 from __future__ import annotations
 
+from collections.abc import Iterator
 from dataclasses import dataclass
-from typing import Iterator, Literal
+from typing import Literal
 
 import numpy as np
 
-from iad.detectors.base import SessionArrays
+from iad.detectors.base import FloatArray, SessionArrays
 from iad.models import EventType, InputEvent, Session
 
 SessionKind = Literal["human", "bot_naive", "bot_evasive"]
@@ -51,11 +52,11 @@ BURST_MIN, BURST_MAX = 3, 8
 
 @dataclass(frozen=True)
 class _Raw:
-    t_move: np.ndarray
-    mx: np.ndarray
-    my: np.ndarray
-    t_down: np.ndarray
-    t_up: np.ndarray
+    t_move: FloatArray
+    mx: FloatArray
+    my: FloatArray
+    t_down: FloatArray
+    t_up: FloatArray
     codes: list[str]
 
 
@@ -64,7 +65,7 @@ class _Raw:
 # --------------------------------------------------------------------------- #
 
 
-def _think_times(rng: np.random.Generator, kind: SessionKind, n: int) -> np.ndarray:
+def _think_times(rng: np.random.Generator, kind: SessionKind, n: int) -> FloatArray:
     """Inter-action delays, in seconds."""
     if kind == "human":
         median = rng.uniform(0.22, 0.45)
@@ -87,7 +88,7 @@ def _think_times(rng: np.random.Generator, kind: SessionKind, n: int) -> np.ndar
     return np.clip(d, 0.04, None)
 
 
-def _dwells(rng: np.random.Generator, kind: SessionKind, n: int) -> np.ndarray:
+def _dwells(rng: np.random.Generator, kind: SessionKind, n: int) -> FloatArray:
     """Press durations, in seconds."""
     if kind == "human":
         median = rng.uniform(0.075, 0.115)
@@ -114,12 +115,13 @@ def _dwells(rng: np.random.Generator, kind: SessionKind, n: int) -> np.ndarray:
 # --------------------------------------------------------------------------- #
 
 
-def _progress(kind: SessionKind, n: int) -> np.ndarray:
+def _progress(kind: SessionKind, n: int) -> FloatArray:
     """Where along the path each sample falls, i.e. the velocity profile."""
     s = np.linspace(0.0, 1.0, n)
     if kind == "human":
         # Minimum-jerk profile: the classic model of a human ballistic reach.
-        return 10 * s**3 - 15 * s**4 + 6 * s**5
+        out: FloatArray = 10 * s**3 - 15 * s**4 + 6 * s**5
+        return out
     if kind == "bot_naive":
         return s
     # Smoothstep easing, what humanizer libraries typically use.
@@ -127,8 +129,8 @@ def _progress(kind: SessionKind, n: int) -> np.ndarray:
 
 
 def _bezier(
-    p0: np.ndarray, p3: np.ndarray, o1: float, o2: float, u: np.ndarray
-) -> tuple[np.ndarray, np.ndarray]:
+    p0: FloatArray, p3: FloatArray, o1: float, o2: float, u: FloatArray
+) -> tuple[FloatArray, FloatArray]:
     delta = p3 - p0
     dist = float(np.hypot(*delta))
     if dist < 1e-9:
@@ -149,18 +151,30 @@ def _bezier(
 def _stroke(
     rng: np.random.Generator,
     kind: SessionKind,
-    p0: np.ndarray,
-    p3: np.ndarray,
+    p0: FloatArray,
+    p3: FloatArray,
     n_pts: int,
-) -> tuple[np.ndarray, np.ndarray]:
+) -> tuple[FloatArray, FloatArray]:
     dist = float(np.hypot(*(p3 - p0)))
 
     if kind == "human":
-        curve_sd, tremor, overshoot_p, over_lo, over_hi = 0.090, rng.uniform(0.5, 1.4), 0.65, 0.04, 0.12
+        curve_sd, tremor, overshoot_p, over_lo, over_hi = (
+            0.090,
+            rng.uniform(0.5, 1.4),
+            0.65,
+            0.04,
+            0.12,
+        )
     elif kind == "bot_naive":
         curve_sd, tremor, overshoot_p, over_lo, over_hi = 0.0, 0.0, 0.0, 0.0, 0.0
     else:
-        curve_sd, tremor, overshoot_p, over_lo, over_hi = 0.082, rng.uniform(0.40, 1.15), 0.50, 0.03, 0.09
+        curve_sd, tremor, overshoot_p, over_lo, over_hi = (
+            0.082,
+            rng.uniform(0.40, 1.15),
+            0.50,
+            0.03,
+            0.09,
+        )
 
     # Same-sign control offsets so the path is a genuine arc, not an S-curve.
     sign = 1.0 if rng.random() < 0.5 else -1.0
@@ -176,9 +190,7 @@ def _stroke(
         xs, ys = _bezier(p0, p_over, o1, o2, u)
         # Corrective sub-movement back onto the target, itself slightly curved.
         uc = _progress(kind, n_corr + 1)[1:]
-        cx, cy = _bezier(
-            p_over, p3, rng.normal(0.0, 0.10 * dist * 0.08), 0.0, uc
-        )
+        cx, cy = _bezier(p_over, p3, rng.normal(0.0, 0.10 * dist * 0.08), 0.0, uc)
         xs = np.concatenate([xs, cx])
         ys = np.concatenate([ys, cy])
     else:
@@ -205,9 +217,9 @@ def _generate_raw(rng: np.random.Generator, kind: SessionKind) -> _Raw:
     think = _think_times(rng, kind, max_presses)
     dwell = _dwells(rng, kind, max_presses)
 
-    t_move: list[np.ndarray] = []
-    mxs: list[np.ndarray] = []
-    mys: list[np.ndarray] = []
+    t_move: list[FloatArray] = []
+    mxs: list[FloatArray] = []
+    mys: list[FloatArray] = []
     t_down: list[float] = []
     t_up: list[float] = []
     codes: list[str] = []
@@ -239,8 +251,10 @@ def _generate_raw(rng: np.random.Generator, kind: SessionKind) -> _Raw:
             t = float(ts[-1])
 
             # Reaction delay between arriving and pressing.
-            t += rng.uniform(0.015, 0.070) if kind == "human" else (
-                0.004 if kind == "bot_naive" else rng.uniform(0.010, 0.050)
+            t += (
+                rng.uniform(0.015, 0.070)
+                if kind == "human"
+                else (0.004 if kind == "bot_naive" else rng.uniform(0.010, 0.050))
             )
             t_down.append(t)
             t += float(dwell[press_i])

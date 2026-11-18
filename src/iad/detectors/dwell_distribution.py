@@ -29,6 +29,7 @@ import numpy as np
 from scipy import stats
 
 from iad.detectors.base import (
+    FloatArray,
     SessionArrays,
     band_deviation,
     clamp01,
@@ -46,7 +47,7 @@ SKEW_HALFWIDTH = 1.55
 WEIGHTS = (0.35, 0.35, 0.15, 0.15)
 
 
-def _shape_score(d: np.ndarray) -> float:
+def _shape_score(d: FloatArray) -> float:
     med = float(np.median(d))
     if med <= 0:
         return 1.0
@@ -55,7 +56,7 @@ def _shape_score(d: np.ndarray) -> float:
     return ramp(ks, 0.115, 0.42)
 
 
-def _dispersion_score(d: np.ndarray) -> float:
+def _dispersion_score(d: FloatArray) -> float:
     mean = float(d.mean())
     if mean <= 0:
         return 1.0
@@ -63,13 +64,13 @@ def _dispersion_score(d: np.ndarray) -> float:
     return ramp(cv, 0.52, 0.12)
 
 
-def _asymmetry_score(d: np.ndarray) -> float:
+def _asymmetry_score(d: FloatArray) -> float:
     if float(d.std(ddof=1)) < 1e-9:
         return 1.0
     return band_deviation(float(stats.skew(d)), SKEW_CENTER, SKEW_HALFWIDTH)
 
 
-def _quantization_score(d: np.ndarray) -> float:
+def _quantization_score(d: FloatArray) -> float:
     q = np.round(d).astype(np.int64)
     _, counts = np.unique(q, return_counts=True)
     collided = int(counts[counts > 1].sum())
@@ -92,4 +93,3 @@ class DwellDistributionDetector:
             _quantization_score(d),
         )
         return clamp01(float(np.dot(parts, WEIGHTS)))
-

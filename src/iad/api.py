@@ -1,11 +1,11 @@
 """FastAPI surface for the detector.
 
-    uvicorn iad.api:app --reload
+uvicorn iad.api:app --reload
 """
 
 from __future__ import annotations
 
-from typing import Literal
+from typing import Annotated, Literal
 
 from fastapi import FastAPI, HTTPException, Query
 from pydantic import BaseModel, Field
@@ -23,6 +23,9 @@ app = FastAPI(
 )
 
 _scorer = Scorer()
+
+KindParam = Annotated[SessionKind, Query(description=f"One of {', '.join(KINDS)}.")]
+SeedParam = Annotated[int | None, Query(ge=0, description="Omit for a random one.")]
 
 
 class Health(BaseModel):
@@ -61,12 +64,7 @@ def score(session: Session) -> ScoreResult:
 
 
 @app.post("/synth", response_model=Session, tags=["scoring"])
-def synth(
-    kind: SessionKind = Query(
-        default="human", description=f"One of {', '.join(KINDS)}."
-    ),
-    seed: int | None = Query(default=None, ge=0, description="Omit for a random one."),
-) -> Session:
+def synth(kind: KindParam = "human", seed: SeedParam = None) -> Session:
     """Generate an example session so the API can be tried without real data.
 
     Feed the response straight back into `POST /score`.
@@ -87,10 +85,7 @@ class Demo(BaseModel):
 
 
 @app.post("/demo", response_model=Demo, tags=["scoring"])
-def demo(
-    kind: SessionKind = Query(default="human"),
-    seed: int | None = Query(default=None, ge=0),
-) -> Demo:
+def demo(kind: KindParam = "human", seed: SeedParam = None) -> Demo:
     """Generate and immediately score a session. Convenience wrapper for demos."""
     session = synth(kind=kind, seed=seed)
     result = _scorer.score_session(session)

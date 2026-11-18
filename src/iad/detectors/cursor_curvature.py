@@ -25,6 +25,7 @@ from __future__ import annotations
 import numpy as np
 
 from iad.detectors.base import (
+    FloatArray,
     SessionArrays,
     band_deviation,
     clamp01,
@@ -41,7 +42,7 @@ REVERSAL_HALFWIDTH = 0.26
 WEIGHTS = (0.40, 0.35, 0.25)
 
 
-def _stroke_stats(px: np.ndarray, py: np.ndarray) -> tuple[float, float, bool] | None:
+def _stroke_stats(px: FloatArray, py: FloatArray) -> tuple[float, float, bool] | None:
     """Return (efficiency, reversal_rate, overshot) for one stroke."""
     dx = np.diff(px)
     dy = np.diff(py)
@@ -105,4 +106,3 @@ class CursorCurvatureDetector:
 
         parts = (straightness, reversal, overshoot)
         return clamp01(float(np.dot(parts, WEIGHTS)))
-

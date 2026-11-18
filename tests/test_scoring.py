@@ -21,7 +21,7 @@ NAMES = tuple(DEFAULT_WEIGHTS)
 def test_combine_stays_in_range(scorer):
     rng = np.random.default_rng(3)
     for _ in range(500):
-        vals = dict(zip(NAMES, rng.random(len(NAMES))))
+        vals = dict(zip(NAMES, rng.random(len(NAMES)), strict=False))
         assert 0.0 <= scorer.combine(vals) <= 1.0
 
 
@@ -29,7 +29,7 @@ def test_combine_is_monotonic_in_every_detector(scorer):
     """Raising one detector can never lower the combined score."""
     rng = np.random.default_rng(5)
     for _ in range(200):
-        base = dict(zip(NAMES, rng.random(len(NAMES))))
+        base = dict(zip(NAMES, rng.random(len(NAMES)), strict=False))
         for name in NAMES:
             lifted = dict(base)
             lifted[name] = min(1.0, base[name] + rng.uniform(0.01, 0.4))
@@ -37,35 +37,35 @@ def test_combine_is_monotonic_in_every_detector(scorer):
 
 
 def test_combine_is_strictly_increasing_for_positive_weights(scorer):
-    base = {n: 0.4 for n in NAMES}
+    base = dict.fromkeys(NAMES, 0.4)
     for name in NAMES:
         lifted = dict(base, **{name: 0.9})
         assert scorer.combine(lifted) > scorer.combine(base)
 
 
 def test_combine_hits_both_extremes(scorer):
-    assert scorer.combine({n: 0.0 for n in NAMES}) == pytest.approx(0.0)
-    assert scorer.combine({n: 1.0 for n in NAMES}) == pytest.approx(1.0)
+    assert scorer.combine(dict.fromkeys(NAMES, 0.0)) == pytest.approx(0.0)
+    assert scorer.combine(dict.fromkeys(NAMES, 1.0)) == pytest.approx(1.0)
 
 
 def test_combine_renormalizes_when_detectors_are_missing(scorer):
     """A subset of detectors must still produce a score on the same scale."""
     for r in (1, 2):
         for subset in itertools.combinations(NAMES, r):
-            assert scorer.combine({n: 1.0 for n in subset}) == pytest.approx(1.0)
-            assert scorer.combine({n: 0.0 for n in subset}) == pytest.approx(0.0)
+            assert scorer.combine(dict.fromkeys(subset, 1.0)) == pytest.approx(1.0)
+            assert scorer.combine(dict.fromkeys(subset, 0.0)) == pytest.approx(0.0)
 
 
 def test_combine_ignores_abstaining_detectors(scorer):
     """None means "no data", so it must not pull the score toward any value."""
     for name in NAMES:
-        scores: dict[str, float | None] = {n: 0.2 for n in NAMES}
+        scores: dict[str, float | None] = dict.fromkeys(NAMES, 0.2)
         scores[name] = None
         assert scorer.combine(scores) == pytest.approx(0.2)
 
 
 def test_combine_returns_none_when_every_detector_abstains(scorer):
-    assert scorer.combine({n: None for n in NAMES}) is None
+    assert scorer.combine(dict.fromkeys(NAMES)) is None
     assert scorer.combine({}) is None
 
 

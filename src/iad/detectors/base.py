@@ -8,12 +8,16 @@ path and the API path see byte-identical features.
 
 from __future__ import annotations
 
+import itertools
 from dataclasses import dataclass
 from typing import Protocol, runtime_checkable
 
 import numpy as np
+import numpy.typing as npt
 
 from iad.models import DOWN_TYPES, UP_TYPES, EventType, Session
+
+FloatArray = npt.NDArray[np.float64]
 
 # A cursor stroke ends when the pointer rests for longer than this. Chosen to sit
 # above typical intra-stroke sampling (8-25 ms) and below human reaction pauses.
@@ -40,11 +44,11 @@ class SessionArrays:
         n_events: total raw events, for reporting.
     """
 
-    t_move: np.ndarray
-    mx: np.ndarray
-    my: np.ndarray
-    t_action: np.ndarray
-    dwell_ms: np.ndarray
+    t_move: FloatArray
+    mx: FloatArray
+    my: FloatArray
+    t_action: FloatArray
+    dwell_ms: FloatArray
     n_events: int
 
     def strokes(self) -> list[tuple[int, int]]:
@@ -61,7 +65,7 @@ class SessionArrays:
         bounds = np.concatenate(([0], gaps, [n]))
         return [
             (int(a), int(b))
-            for a, b in zip(bounds[:-1], bounds[1:])
+            for a, b in itertools.pairwise(bounds)
             if b - a >= MIN_STROKE_POINTS
         ]
 

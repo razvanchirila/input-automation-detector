@@ -20,7 +20,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from iad.detectors.base import SessionArrays, clamp01, ramp
+from iad.detectors.base import FloatArray, SessionArrays, clamp01, ramp
 
 MIN_INTERVALS = 8
 
@@ -34,7 +34,7 @@ _MAX_ENTROPY = float(np.log(len(_LOG_BINS) - 1))
 WEIGHTS = (0.45, 0.35, 0.20)
 
 
-def _dispersion_score(d: np.ndarray) -> float:
+def _dispersion_score(d: FloatArray) -> float:
     mean = float(d.mean())
     if mean <= 0:
         return 1.0
@@ -45,7 +45,7 @@ def _dispersion_score(d: np.ndarray) -> float:
     return ramp(cv, 1.10, 0.50)
 
 
-def _spread_score(d: np.ndarray) -> float:
+def _spread_score(d: FloatArray) -> float:
     med = float(np.median(d))
     if med <= 0:
         return 1.0
@@ -59,7 +59,7 @@ def _spread_score(d: np.ndarray) -> float:
     return ramp(entropy, 0.78, 0.38)
 
 
-def _clustering_score(d: np.ndarray) -> float:
+def _clustering_score(d: FloatArray) -> float:
     s = np.sort(d)
     # An interval is "clustered" if its neighbour in sorted order is within
     # DUP_REL_TOL relative distance. O(n log n) and tolerant of scale.
@@ -87,4 +87,3 @@ class IntervalRegularityDetector:
 
         parts = (_dispersion_score(d), _spread_score(d), _clustering_score(d))
         return clamp01(float(np.dot(parts, WEIGHTS)))
-

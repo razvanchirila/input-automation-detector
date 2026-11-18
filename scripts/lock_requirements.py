@@ -23,20 +23,37 @@ def main() -> int:
         report = Path(tmp) / "report.json"
         subprocess.run(
             [
-                sys.executable, "-m", "pip", "install", "--quiet", "--dry-run",
-                "--ignore-installed", "--only-binary=:all:",
-                "--platform", "manylinux_2_17_x86_64", "--python-version", "3.11",
-                "--implementation", "cp", "--target", str(Path(tmp) / "target"),
-                "--report", str(report), *deps,
+                sys.executable,
+                "-m",
+                "pip",
+                "install",
+                "--quiet",
+                "--dry-run",
+                "--ignore-installed",
+                "--only-binary=:all:",
+                "--platform",
+                "manylinux_2_17_x86_64",
+                "--python-version",
+                "3.11",
+                "--implementation",
+                "cp",
+                "--target",
+                str(Path(tmp) / "target"),
+                "--report",
+                str(report),
+                *deps,
             ],
             check=True,
         )
         installed = json.loads(report.read_text(encoding="utf-8"))["install"]
     pins = sorted(
-        f"{i['metadata']['name'].lower()}=={i['metadata']['version']}" for i in installed
+        f"{i['metadata']['name'].lower()}=={i['metadata']['version']}"
+        for i in installed
     )
     header = "# Runtime lock for the container image. Regenerate: make lock\n"
-    (ROOT / "requirements.txt").write_text(header + "\n".join(pins) + "\n", encoding="utf-8")
+    (ROOT / "requirements.txt").write_text(
+        header + "\n".join(pins) + "\n", encoding="utf-8"
+    )
     print(f"wrote {len(pins)} pins to requirements.txt")
     return 0
 

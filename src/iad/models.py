@@ -2,14 +2,15 @@
 
 from __future__ import annotations
 
-from enum import Enum
+from enum import StrEnum
 from typing import Literal
 
-from iad.config import settings
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from iad.config import settings
 
-class EventType(str, Enum):
+
+class EventType(StrEnum):
     MOUSE_MOVE = "mouse_move"
     MOUSE_DOWN = "mouse_down"
     MOUSE_UP = "mouse_up"

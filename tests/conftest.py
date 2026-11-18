@@ -1,11 +1,6 @@
-import sys
-from pathlib import Path
-
 import pytest
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
-
-from iad.scoring import Scorer  # noqa: E402
+from iad.scoring import Scorer
 
 
 @pytest.fixture(scope="session")

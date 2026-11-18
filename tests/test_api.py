@@ -72,7 +72,8 @@ def test_score_response_shape(client):
 
 def test_score_flags_naive_bot_and_clears_human(client):
     bot = client.post(
-        "/score", json=generate_session(kind="bot_naive", seed=6).model_dump(mode="json")
+        "/score",
+        json=generate_session(kind="bot_naive", seed=6).model_dump(mode="json"),
     ).json()
     human = client.post(
         "/score", json=generate_session(kind="human", seed=6).model_dump(mode="json")
@@ -99,7 +100,9 @@ def test_score_rejects_malformed_session(client):
 
 def test_score_rejects_oversized_session(client):
     limit = settings.max_events
-    events = [{"t": i * 0.01, "type": "key_down", "code": "a"} for i in range(limit + 1)]
+    events = [
+        {"t": i * 0.01, "type": "key_down", "code": "a"} for i in range(limit + 1)
+    ]
     r = client.post("/score", json={"session_id": "big", "events": events})
     assert r.status_code == 422
     assert r.json()["detail"][0]["type"] == "too_long"
@@ -144,8 +147,8 @@ def test_synth_rejects_unknown_kind(client):
     assert client.post("/synth", params={"kind": "bot_perfect"}).status_code == 422
 
 
-def _keys(n_presses: int) -> list[dict]:
-    events = []
+def _keys(n_presses: int) -> list[dict[str, object]]:
+    events: list[dict[str, object]] = []
     for i in range(n_presses):
         events.append({"t": i * 0.3, "type": "key_down", "code": "a"})
         events.append({"t": i * 0.3 + 0.1, "type": "key_up", "code": "a"})

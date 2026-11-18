@@ -15,31 +15,34 @@ from scipy import stats
 
 from iad.detectors import (
     CursorCurvatureDetector,
+    Detector,
     DwellDistributionDetector,
     IntervalRegularityDetector,
     default_detectors,
     from_session,
 )
-from iad.detectors.base import SessionArrays
-from iad.synth import generate_arrays, generate_session
+from iad.detectors.base import FloatArray, SessionArrays
+from iad.synth import SessionKind, generate_arrays, generate_session
 
 N_SAMPLE = 120
 SAMPLE_SEED = 4242
 
-ALL_DETECTORS = [
+ALL_DETECTORS: list[Detector] = [
     IntervalRegularityDetector(),
     CursorCurvatureDetector(),
     DwellDistributionDetector(),
 ]
 
 
-def sample_scores(detector, kind: str, n: int = N_SAMPLE, seed: int = SAMPLE_SEED):
+def sample_scores(
+    detector: Detector, kind: SessionKind, n: int = N_SAMPLE, seed: int = SAMPLE_SEED
+):
     rng = np.random.default_rng(seed)
     return np.array([detector.score(generate_arrays(kind, rng)) for _ in range(n)])
 
 
 @pytest.fixture(scope="module")
-def scores() -> dict[str, dict[str, np.ndarray]]:
+def scores() -> dict[str, dict[str, FloatArray]]:
     return {
         d.name: {k: sample_scores(d, k) for k in ("human", "bot_naive", "bot_evasive")}
         for d in ALL_DETECTORS
