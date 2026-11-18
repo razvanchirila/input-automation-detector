@@ -31,9 +31,15 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     WEB_CONCURRENCY=1 \
     IAD_LOG_LEVEL=INFO
 
+RUN apt-get update \
+ && apt-get upgrade -y --no-install-recommends \
+ && rm -rf /var/lib/apt/lists/*
+
+# setuptools and wheel ship with the base image but are only needed to build.
 RUN --mount=type=bind,from=builder,source=/wheels,target=/wheels \
     pip install --no-cache-dir --no-index --find-links=/wheels \
         -r /wheels/requirements.txt input-automation-detector \
+ && pip uninstall -y setuptools wheel \
  && groupadd --system --gid 10001 app \
  && useradd --system --uid 10001 --gid 10001 --no-create-home --shell /usr/sbin/nologin app
 
