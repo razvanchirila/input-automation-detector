@@ -16,7 +16,7 @@ against that, so the numbers below are the honest hard case rather than a flatte
 python -m venv .venv
 .venv\Scripts\activate          # Windows
 # source .venv/bin/activate     # Linux / macOS
-pip install -r requirements.txt
+pip install -r requirements.txt -e ".[dev,eval]"
 
 pytest                          # 66 tests
 python eval/evaluate.py         # regenerates eval/results.md
