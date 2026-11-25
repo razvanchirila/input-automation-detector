@@ -16,7 +16,7 @@ classifiers = [
     "License :: OSI Approved :: MIT License",
 ]
 dependencies = [
-    "fastapi~=0.164.0",
+    "fastapi>=0.164,<0.166",
     "numpy>=2.1.3,<2.5.0",
     "prometheus-client~=0.26.0",
     "pydantic>=2.10.4,<2.15.0",
